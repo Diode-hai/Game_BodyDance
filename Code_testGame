@@ -1,0 +1,809 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+using Emgu.CV;
+using Emgu.CV.Cvb;
+using Emgu.CV.UI;
+using Emgu.CV.CvEnum;
+using Emgu.CV.Structure;
+using Emgu.CV.VideoSurveillance;
+using System.IO;
+using WMPLib;
+using System.Threading;
+
+using DirectShowLib;
+
+namespace NewBodyDance
+{
+    public partial class Form1 : Form
+    {
+        private static VideoCapture _cameraCapture;
+        private static BackgroundSubtractor _fgDetector;
+        private static Emgu.CV.Cvb.CvBlobDetector _blobDetector;
+        private static Emgu.CV.Cvb.CvTracks _tracker;
+        
+        bool Btn_L1, Btn_L2, Btn_L3;
+
+        bool track_img_R = false;
+        bool track_img_L = false;
+        bool track_img_UP = false;
+        bool track_img_NE = false;
+        bool track_img_NW = false;
+
+        int Score_p;
+        int time_play = 0;
+        string value_H_score, value_T_score;
+        bool B_L1_score, B_L2_score, B_L3_score;
+        bool Else_score = false;
+        //WMPLib.WindowsMediaPlayer wplayer = new WMPLib.WindowsMediaPlayer();
+        OpenFileDialog open = new OpenFileDialog();
+
+        public Form1()
+        {
+            InitializeComponent();
+            //FormBorderStyle = FormBorderStyle.None;
+            WindowState = FormWindowState.Maximized;
+
+            Btn_L1 = true;
+            Btn_L2 = true;
+            Btn_L3 = true;
+            pictureBox_up.BackColor = Color.Transparent;
+            pictureBox_RR.BackColor = Color.Transparent;
+            pictureBox_LL.BackColor = Color.Transparent;
+            pictureBox_NE.BackColor = Color.Transparent;
+            pictureBox_NW.BackColor = Color.Transparent;
+            Run();
+        }
+        //----------------
+        void Run()
+        {
+            try
+            {
+
+                DsDevice[] videDevices;
+                videDevices = DsDevice.GetDevicesOfCat(FilterCategory.VideoInputDevice);
+                if (videDevices.Length == 0)
+                {
+                    throw new Exception();
+                }
+                for (int V = 1, n = videDevices.Length; V <= n; V++)
+                {
+                    string cameraName = V + " : " + videDevices[V - 1].Name;
+                    comboBox1.Items.Add(cameraName);
+                }
+                comboBox1.SelectedIndex = 0;
+                _cameraCapture = new VideoCapture(comboBox1.SelectedIndex);
+
+            }
+            catch (Exception e)
+            {
+                MessageBox.Show(e.Message);
+                return;
+            }
+
+            _fgDetector = new Emgu.CV.VideoSurveillance.BackgroundSubtractorMOG2();
+            _blobDetector = new CvBlobDetector();
+            _tracker = new CvTracks();
+
+            Application.Idle += ProcessFrame;
+            timer_Help.Start();
+        }
+        //-------------
+        void ProcessFrame(object sender, EventArgs e)
+        {
+            //=============================Sting Label========================================================
+            if (B_L1_score == true)
+            {
+                value_H_score = File.ReadAllText(Application.StartupPath + "/Score_L1/High-Score.txt");
+                value_T_score = File.ReadAllText(Application.StartupPath + "/Score_L1/High-Time-Score.txt");
+                label_high_score.Text = value_H_score;
+                label_sec.Text = value_T_score;
+            }
+            if (B_L2_score == true)
+            {
+                value_H_score = File.ReadAllText(Application.StartupPath + "/Score_L2/High-Score.txt");
+                value_T_score = File.ReadAllText(Application.StartupPath + "/Score_L2/High-Time-Score.txt");
+                label_high_score.Text = value_H_score;
+                label_sec.Text = value_T_score;
+            }
+            if (B_L3_score == true)
+            {
+                value_H_score = File.ReadAllText(Application.StartupPath + "/Score_L3/High-Score.txt");
+                value_T_score = File.ReadAllText(Application.StartupPath + "/Score_L3/High-Time-Score.txt");
+                label_high_score.Text = value_H_score;
+                label_sec.Text = value_T_score;
+            }
+
+            label_score.Text = "Score: " + Score_p.ToString();
+            //==============================-___R___============================================
+            Mat f = _cameraCapture.QueryFrame();
+            Image<Bgr, byte> cam_RR = f.ToImage<Bgr, byte>().Flip(Emgu.CV.CvEnum.FlipType.Horizontal);
+            //cam_RR.Draw(new Rectangle(539, 194, 100, 110), new Bgr(Color.Blue), 1);
+
+            Rectangle ROI_RR = new Rectangle(539, 194, 100, 110);
+            Mat frame_R = new Mat(cam_RR.Mat, ROI_RR);
+            //Mat frame = f;
+
+
+            Mat smoothedFrame = new Mat();
+            CvInvoke.GaussianBlur(frame_R, smoothedFrame, new Size(3, 3), 1); //filter out noises
+                                                                              //frame._SmoothGaussian(3); 
+
+            #region use the BG/FG detector to find the forground mask
+            Mat forgroundMask = new Mat();
+            _fgDetector.Apply(smoothedFrame, forgroundMask);
+            #endregion
+
+            CvBlobs blobs = new CvBlobs();
+            _blobDetector.Detect(forgroundMask.ToImage<Gray, byte>(), blobs);
+            blobs.FilterByArea(100, int.MaxValue);
+
+            // float scale = (frame_R.Width + frame_R.Width) / 2.0f;
+            _tracker.Update(blobs, 500, 2, 1);
+
+            foreach (var pair in _tracker)
+            {
+                CvTrack b = pair.Value;
+                //CvInvoke.Rectangle(frame_R, b.BoundingBox, new MCvScalar(255.0, 255.0, 255.0), 2);
+                //CvInvoke.PutText(frame_R, b.Id.ToString(), new Point((int)Math.Round(b.Centroid.X), (int)Math.Round(b.Centroid.Y)), FontFace.HersheyPlain, 1.0, new MCvScalar(255.0, 255.0, 255.0));
+
+                if (b.Id == 1 && pair.Value.BoundingBox.Width >= 80 && pair.Value.BoundingBox.Height >= 90 && track_img_R == true)
+                {
+                    timer_score.Start();
+                }
+
+            }
+
+            //imageBox1.Image = cam_RR;
+            //imageBox2.Image = forgroundMask;
+
+            //==============================___L___============================================
+            //cam_RR.Draw(new Rectangle(1, 194, 100, 110), new Bgr(Color.Blue), 1);
+            Rectangle ROI_LL = new Rectangle(1, 194, 100, 110);
+            Mat frame_L = new Mat(cam_RR.Mat, ROI_LL);
+
+            Mat smoothedFrame_L = new Mat();
+            CvInvoke.GaussianBlur(frame_L, smoothedFrame_L, new Size(3, 3), 1); //filter out noises
+                                                                                //frame._SmoothGaussian(3); 
+
+            #region use the BG/FG detector to find the forground mask
+            Mat forgroundMask_L = new Mat();
+            _fgDetector.Apply(smoothedFrame_L, forgroundMask_L);
+            #endregion
+
+            CvBlobs blobs_L = new CvBlobs();
+            _blobDetector.Detect(forgroundMask_L.ToImage<Gray, byte>(), blobs_L);
+            blobs_L.FilterByArea(100, int.MaxValue);
+
+            float scale_L = (frame_L.Width + frame_L.Width) / 2.0f;
+            _tracker.Update(blobs_L, 0.01 * scale_L, 5, 5);
+
+            foreach (var pair in _tracker)
+            {
+                CvTrack b = pair.Value;
+                //CvInvoke.Rectangle(frame_L, b.BoundingBox, new MCvScalar(255.0, 255.0, 255.0), 2);
+                //CvInvoke.PutText(frame_L, b.Id.ToString(), new Point((int)Math.Round(b.Centroid.X), (int)Math.Round(b.Centroid.Y)), FontFace.HersheyPlain, 1.0, new MCvScalar(255.0, 255.0, 255.0));
+                if (b.Id == 1 && pair.Value.BoundingBox.Width >= 80 && pair.Value.BoundingBox.Height >= 90 && track_img_L == true)
+                {
+                    timer_score.Start();
+                }
+            }
+
+            //imageBox1.Image = cam_RR;
+
+            //==============================-___Up___============================================
+            //cam_RR.Draw(new Rectangle(282, 1 , 100, 110), new Bgr(Color.Blue), 1);
+            Rectangle ROI_UP = new Rectangle(282, 1, 100, 110);
+            Mat frame_UP = new Mat(cam_RR.Mat, ROI_UP);
+
+            Mat smoothedFrame_UP = new Mat();
+            CvInvoke.GaussianBlur(frame_UP, smoothedFrame_UP, new Size(3, 3), 1); //filter out noises
+                                                                                  //frame._SmoothGaussian(3); 
+
+            #region use the BG/FG detector to find the forground mask
+            Mat forgroundMask_UP = new Mat();
+            _fgDetector.Apply(smoothedFrame_UP, forgroundMask_UP);
+            #endregion
+
+            CvBlobs blobs_UP = new CvBlobs();
+            _blobDetector.Detect(forgroundMask_UP.ToImage<Gray, byte>(), blobs_UP);
+            blobs_UP.FilterByArea(100, int.MaxValue);
+
+            float scale_UP = (frame_UP.Width + frame_UP.Width) / 2.0f;
+            _tracker.Update(blobs_UP, 0.01 * scale_UP, 5, 5);
+
+            foreach (var pair in _tracker)
+            {
+                CvTrack b = pair.Value;
+                //CvInvoke.Rectangle(frame_UP, b.BoundingBox, new MCvScalar(255.0, 255.0, 255.0), 2);
+                //CvInvoke.PutText(frame_UP, b.Id.ToString(), new Point((int)Math.Round(b.Centroid.X), (int)Math.Round(b.Centroid.Y)), FontFace.HersheyPlain, 1.0, new MCvScalar(255.0, 255.0, 255.0));
+
+                if (b.Id == 1 && pair.Value.BoundingBox.Width >= 80 && pair.Value.BoundingBox.Height >= 90 && track_img_UP == true) //100,110
+                {
+                    timer_score.Start();
+                }
+            }
+
+            //==============================-___NE___============================================
+            //cam_RR.Draw(new Rectangle(480, 35, 100, 110), new Bgr(Color.Blue), 1);
+            Rectangle ROI_NE = new Rectangle(480, 35, 100, 110);
+            Mat frame_NE = new Mat(cam_RR.Mat, ROI_NE);
+            //Mat frame = f;
+
+
+            Mat smoothedFrame_NE = new Mat();
+            CvInvoke.GaussianBlur(frame_NE, smoothedFrame_NE, new Size(3, 3), 1); //filter out noises
+                                                                                  //frame._SmoothGaussian(3); 
+
+            #region use the BG/FG detector to find the forground mask
+            Mat forgroundMask_NE = new Mat();
+            _fgDetector.Apply(smoothedFrame_NE, forgroundMask_NE);
+            #endregion
+
+            CvBlobs blobs_NE = new CvBlobs();
+            _blobDetector.Detect(forgroundMask_NE.ToImage<Gray, byte>(), blobs_NE);
+            blobs_NE.FilterByArea(100, int.MaxValue);
+
+            float scale_NE = (frame_NE.Width + frame_NE.Width) / 2.0f;
+            _tracker.Update(blobs_NE, 0.01 * scale_NE, 5, 5);
+
+            foreach (var pair in _tracker)
+            {
+                CvTrack b = pair.Value;
+                //CvInvoke.Rectangle(frame_NE, b.BoundingBox, new MCvScalar(255.0, 255.0, 255.0), 2);
+                //CvInvoke.PutText(frame_NE, b.Id.ToString(), new Point((int)Math.Round(b.Centroid.X), (int)Math.Round(b.Centroid.Y)), FontFace.HersheyPlain, 1.0, new MCvScalar(255.0, 255.0, 255.0));
+
+                if (b.Id == 1 && pair.Value.BoundingBox.Width >= 80 && pair.Value.BoundingBox.Height >= 90 && track_img_NE == true)
+                {
+                    timer_score.Start();
+                }
+            }
+            //==============================-___NW___============================================
+            //cam_RR.Draw(new Rectangle(70, 35, 100, 110), new Bgr(Color.Blue), 1);
+            Rectangle ROI_NW = new Rectangle(70, 35, 100, 110);
+            Mat frame_NW = new Mat(cam_RR.Mat, ROI_NW);
+            //Mat frame = f;
+
+
+            Mat smoothedFrame_NW = new Mat();
+            CvInvoke.GaussianBlur(frame_NW, smoothedFrame_NW, new Size(3, 3), 1); //filter out noises
+                                                                                  //frame._SmoothGaussian(3); 
+
+            #region use the BG/FG detector to find the forground mask
+            Mat forgroundMask_NW = new Mat();
+            _fgDetector.Apply(smoothedFrame_NW, forgroundMask_NW);
+            #endregion
+
+            CvBlobs blobs_NW = new CvBlobs();
+            _blobDetector.Detect(forgroundMask_NW.ToImage<Gray, byte>(), blobs_NW);
+            blobs_NW.FilterByArea(100, int.MaxValue);
+
+            float scale_NW = (frame_NW.Width + frame_NW.Width) / 2.0f;
+            _tracker.Update(blobs_NW, 0.01 * scale_NW, 5, 5);
+
+            foreach (var pair in _tracker)
+            {
+                CvTrack b = pair.Value;
+                //CvInvoke.Rectangle(frame_NW, b.BoundingBox, new MCvScalar(255.0, 255.0, 255.0), 2);
+                //CvInvoke.PutText(frame_NW, b.Id.ToString(), new Point((int)Math.Round(b.Centroid.X), (int)Math.Round(b.Centroid.Y)), FontFace.HersheyPlain, 1.0, new MCvScalar(255.0, 255.0, 255.0));
+
+                if (b.Id == 1 && pair.Value.BoundingBox.Width >= 80 && pair.Value.BoundingBox.Height >= 90 && track_img_NW == true)
+                {
+                    timer_score.Start();
+                }
+
+            }
+            //============================================================================================
+            imageBox1.Image = cam_RR;
+        }
+
+        private void axWindowsMediaPlayer2_PlayStateChange(object sender, AxWMPLib._WMPOCXEvents_PlayStateChangeEvent e)
+        {
+            if (e.newState == 3)
+            {
+                timer_play.Start();
+            }
+
+            if (e.newState == 8)
+            {
+                timer_play.Stop();
+                timer_RR.Stop();
+                timer_LL.Stop();
+                timer_up.Stop();
+                timer_NE.Stop();
+                timer_NW.Stop();
+                timer_radom.Stop();
+
+                //===================================Save Score==============================================================
+                int H_score = Int16.Parse(value_H_score);
+                int T_score = Int16.Parse(value_T_score);
+                if (Score_p > H_score && time_play > T_score && B_L1_score && true)
+                {
+                    System.IO.File.WriteAllText(Application.StartupPath + "/Score_L1/High-Score.txt", Score_p.ToString()); //WriteAllText เขียนทับใหม่ //AppendAllText เขียนต่อตัวเดิม
+                    System.IO.File.WriteAllText(Application.StartupPath + "/Score_L1/High-Time-Score.txt", time_play.ToString());
+                    switch (B_L1_score)
+                    {
+                        case true:
+                            MessageBox.Show("You do top score Laevel 1. !!!" + "\n\r" + label_score.Text + " " + label2.Text);
+                            Else_score = true;
+                            Btn_level1.BackColor = Color.AliceBlue;
+                            break;
+
+                    }
+
+                }
+                //-----------
+                if (Score_p > H_score && time_play > T_score && B_L2_score && true)
+                {
+                    System.IO.File.WriteAllText(Application.StartupPath + "/Score_L2/High-Score.txt", Score_p.ToString());
+                    System.IO.File.WriteAllText(Application.StartupPath + "/Score_L2/High-Time-Score.txt", time_play.ToString());
+                    switch (B_L2_score)
+                    {
+                        case true:
+                            MessageBox.Show("You do top score Laevel 2. !!!" + "\n\r" + label_score.Text + " " + label2.Text);
+                            Else_score = true;
+                            Btn_level2.BackColor = Color.AliceBlue;
+                            break;
+
+                    }
+                }
+                //-----------
+                if (Score_p > H_score && time_play > T_score && B_L3_score && true)
+                {
+                    System.IO.File.WriteAllText(Application.StartupPath + "/Score_L3/High-Score.txt", Score_p.ToString());
+                    System.IO.File.WriteAllText(Application.StartupPath + "/Score_L3/High-Time-Score.txt", time_play.ToString());
+                    switch (B_L3_score)
+                    {
+                        case true:
+                            MessageBox.Show("You do top score Laevel 3. !!!" + "\n\r" + label_score.Text + " " + label2.Text);
+                            Else_score = true;
+                            Btn_level3.BackColor = Color.AliceBlue;
+                            break;
+
+                    }
+
+                }
+                //=======================================================================
+                //if (Score_p < H_score && time_play < T_score)
+                //{
+                //    bool E = false;
+                switch (Else_score)
+                {
+                    case false:
+                        MessageBox.Show("Time Out !!!" + "\n\r" + label_score.Text + " " + label2.Text);
+                        Else_score = true;
+                        if (B_L1_score && true)
+                        {
+                            Btn_level1.BackColor = Color.AliceBlue;
+                        }
+                        if (B_L2_score && true)
+                        {
+                            Btn_level2.BackColor = Color.AliceBlue;
+                        }
+                        if (B_L3_score && true)
+                        {
+                            Btn_level3.BackColor = Color.AliceBlue;
+                        }
+                        break;
+
+                }
+
+                //}
+                //=======================
+                timer_RR.Stop();
+                timer_LL.Stop();
+                timer_up.Stop();
+                timer_NE.Stop();
+                timer_NW.Stop();
+                timer_play.Stop();
+                timer_radom.Stop();
+                timer_score.Stop();
+
+                track_img_R = false;
+                track_img_L = false;
+                track_img_UP = false;
+                track_img_NE = false;
+                track_img_NW = false;
+
+                //======================
+            }
+            time_play = 0;
+            Score_p = 0;
+        }
+
+        private void PlayMusic()
+        {
+
+            axWindowsMediaPlayer2.URL = open.FileName;
+            axWindowsMediaPlayer2.Ctlcontrols.play();
+            string text2 = ((IWMPControls2)axWindowsMediaPlayer2.Ctlcontrols).currentPositionString;
+            Else_score = false;
+            //axWindowsMediaPlayer1.PositionChange += axWindowsMediaPlayer1_PositionChange;
+            axWindowsMediaPlayer2.PlayStateChange += new AxWMPLib._WMPOCXEvents_PlayStateChangeEventHandler(axWindowsMediaPlayer2_PlayStateChange);
+
+        }
+
+        private void StopMusic()
+        {
+            axWindowsMediaPlayer2.Ctlcontrols.stop();
+
+            //=======================
+            timer_RR.Stop();
+            timer_LL.Stop();
+            timer_up.Stop();
+            timer_NE.Stop();
+            timer_NW.Stop();
+            timer_play.Stop();
+            timer_radom.Stop();
+            timer_score.Stop();
+
+            track_img_R = false;
+            track_img_L = false;
+            track_img_UP = false;
+            track_img_NE = false;
+            track_img_NW = false;
+            //======================
+        }
+
+        private void Btn_level1_Click(object sender, EventArgs e)
+        {
+            if (Btn_L1)
+            {
+
+                Btn_level1.Text = "Start";
+                open.Filter = "Files (*.mp3; *.mp4; *.wmv; *.avi)|*.mp3; *.mp4; *.wmv; *.avi|All files (*.*)|*.*";
+                if (open.ShowDialog() == DialogResult.OK)
+                {
+                    Score_p = 0;
+                    PlayMusic();
+                    groupBox1.Text = "Level 1";
+
+                    timer_RR.Interval = 2000;
+                    timer_LL.Interval = 2000;
+                    timer_up.Interval = 2000;
+                    timer_NE.Interval = 2000;
+                    timer_NW.Interval = 2000;
+                    timer_radom.Interval = 2000;
+
+                    timer_RR.Start();
+                    timer_LL.Start();
+                    timer_up.Start();
+                    timer_NE.Start();
+                    timer_NW.Start();
+                    timer_radom.Start();
+                    //===========Btn score=====
+                    B_L1_score = true;
+                    B_L2_score = false;
+                    B_L3_score = false;
+                }
+                Btn_level1.BackColor = Color.GreenYellow;
+                Btn_L1 = false;
+
+                Btn_level2.BackColor = Color.Gray;
+                Btn_level2.Text = "Level 2";
+                Btn_L2 = true;
+
+                Btn_level3.BackColor = Color.Gray;
+                Btn_level3.Text = "Level 3";
+                Btn_L3 = true;
+            }
+            else
+            {
+                Btn_level1.BackColor = Color.Gray;
+                Btn_level1.Text = "Level 1";
+                Btn_L1 = true;
+
+                StopMusic();
+
+            }
+
+        }
+
+        private void Btn_level2_Click(object sender, EventArgs e)
+        {
+
+            if (Btn_L2)
+            {
+
+                Btn_level2.Text = "Start";
+                open.Filter = "Files (*.mp3; *.mp4; *.wmv; *.avi)|*.mp3; *.mp4; *.wmv; *.avi|All files (*.*)|*.*";
+                if (open.ShowDialog() == DialogResult.OK)
+                {
+                    Score_p = 0;
+                    PlayMusic();
+                    groupBox1.Text = "Level 2";
+
+                    timer_RR.Interval = 1000;
+                    timer_LL.Interval = 1000;
+                    timer_up.Interval = 1000;
+                    timer_NE.Interval = 1000;
+                    timer_NW.Interval = 1000;
+                    timer_radom.Interval = 500;
+
+                    timer_RR.Start();
+                    timer_LL.Start();
+                    timer_up.Start();
+                    timer_NE.Start();
+                    timer_NW.Start();
+                    timer_radom.Start();
+                    //===========Btn score=====
+                    B_L1_score = false;
+                    B_L2_score = true;
+                    B_L3_score = false;
+                }
+                Btn_level2.BackColor = Color.Plum;
+                Btn_L2 = false;
+
+                Btn_level1.BackColor = Color.Gray;
+                Btn_level1.Text = "Level 1";
+                Btn_L1 = true;
+
+                Btn_level3.BackColor = Color.Gray;
+                Btn_level3.Text = "Level 3";
+                Btn_L3 = true;
+            }
+            else
+            {
+
+                Btn_level2.BackColor = Color.Gray;
+                Btn_level2.Text = "Level 2";
+                Btn_L2 = true;
+
+                StopMusic();
+            }
+        }
+
+        private void Btn_level3_Click(object sender, EventArgs e)
+        {
+
+            if (Btn_L3)
+            {
+
+                Btn_level3.Text = "Start";
+                open.Filter = "Files (*.mp3; *.mp4; *.wmv; *.avi)|*.mp3; *.mp4; *.wmv; *.avi|All files (*.*)|*.*";
+                if (open.ShowDialog() == DialogResult.OK)
+                {
+                    Score_p = 0;
+                    PlayMusic();
+                    groupBox1.Text = "Level 3";
+
+                    timer_RR.Interval = 500;
+                    timer_LL.Interval = 500;
+                    timer_up.Interval = 500;
+                    timer_NE.Interval = 500;
+                    timer_NW.Interval = 500;
+                    timer_radom.Interval = 400;
+
+                    timer_RR.Start();
+                    timer_LL.Start();
+                    timer_up.Start();
+                    timer_NE.Start();
+                    timer_NW.Start();
+                    timer_radom.Start();
+                    //===========Btn score=====
+                    B_L1_score = false;
+                    B_L2_score = false;
+                    B_L3_score = true;
+                }
+
+                Btn_level3.BackColor = Color.Orange;
+                Btn_L3 = false;
+
+                Btn_level1.BackColor = Color.Gray;
+                Btn_level1.Text = "Level 1";
+                Btn_L1 = true;
+
+                Btn_level2.BackColor = Color.Gray;
+                Btn_level2.Text = "Level 2";
+                Btn_L2 = true;
+
+            }
+            else
+            {
+
+                Btn_level3.BackColor = Color.Gray;
+                Btn_level3.Text = "Level 3";
+                Btn_L3 = true;
+
+                StopMusic();
+            }
+        }
+
+        private void Btn_clear_Click(object sender, EventArgs e)
+        {
+            System.IO.File.WriteAllText(Application.StartupPath + "/Score_L1/High-Score.txt", "0");
+            System.IO.File.WriteAllText(Application.StartupPath + "/Score_L1/High-Time-Score.txt", "0");
+
+            System.IO.File.WriteAllText(Application.StartupPath + "/Score_L2/High-Score.txt", "0");
+            System.IO.File.WriteAllText(Application.StartupPath + "/Score_L2/High-Time-Score.txt", "0");
+
+            System.IO.File.WriteAllText(Application.StartupPath + "/Score_L3/High-Score.txt", "0");
+            System.IO.File.WriteAllText(Application.StartupPath + "/Score_L3/High-Time-Score.txt", "0");
+        }
+
+        private void timer_play_Tick(object sender, EventArgs e)
+        {
+            time_play++;
+            label2.Text = "Time second: " + time_play.ToString();
+        }
+
+
+        private void timer_score_Tick(object sender, EventArgs e)
+        {
+            Score_p++;
+            timer_score.Stop();
+        }
+
+        private void Form1_game_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            _cameraCapture.Stop();
+        }
+
+        private void button_help_Click(object sender, EventArgs e)
+        {
+            Start settingsForm = new Start();
+            settingsForm.Show();
+        }
+
+        private void timer_Help_Tick(object sender, EventArgs e)
+        {
+            Start settingsForm = new Start();
+            settingsForm.Show();
+            timer_Help.Stop();
+        }
+
+        private void timer_radom_Tick(object sender, EventArgs e)
+        {
+            pictureBox_RR.Image = new Bitmap("imG/RR/R-0.png");
+            pictureBox_RR.Location = new Point(840, 289);
+            pictureBox_LL.Image = new Bitmap("imG/LL/L-0.png");
+            pictureBox_LL.Location = new Point(5, 289);
+            pictureBox_up.Image = new Bitmap("imG/UP/Up-0.png");
+            pictureBox_up.Location = new Point(440, 5);
+            pictureBox_NE.Image = new Bitmap("imG/NE/NE-0.png");
+            pictureBox_NE.Location = new Point(750, 53);
+            pictureBox_NW.Image = new Bitmap("imG/NW/NW-0.png");
+            pictureBox_NW.Location = new Point(110, 50);
+
+            Random rnd = new Random();
+            int value = rnd.Next(1, 6);
+            switch (value)
+            {
+                case 1:
+                    timer_LL.Start();
+                    break;
+                case 2:
+                    timer_RR.Start();
+                    break;
+                case 3:
+                    timer_up.Start();
+                    break;
+                case 4:
+                    timer_NE.Start();
+                    break;
+                case 5:
+                    timer_NW.Start();
+                    break;
+            }
+        }
+
+        private void button_help_Click_1(object sender, EventArgs e)
+        {
+            Start open = new Start();
+            open.Show();
+        }
+
+        private void timer_RR_Tick(object sender, EventArgs e)
+        {
+            //var files = Directory.GetFiles("imG/RR", "*.png");
+            //var rand = new Random();
+            //pictureBox_RR.Size = new Size(150, 150);
+            //pictureBox_RR.ImageLocation = files[rand.Next(files.Length)]; //"imG/L-0.png"
+            //pictureBox_RR.Location = new Point(840, 289);
+            //imageBox1.Controls.Add(pictureBox_RR);
+            pictureBox_RR.Size = new Size(80, 80);
+            pictureBox_RR.Image = new Bitmap("imG/RR/R-1.png");
+            pictureBox_RR.Location = new Point(840, 289);
+            imageBox1.Controls.Add(pictureBox_RR);
+            track_img_R = true;
+            track_img_L = false;
+            track_img_UP = false;
+            track_img_NE = false;
+            track_img_NW = false;
+            timer_RR.Stop();
+        }
+
+        private void timer_LL_Tick(object sender, EventArgs e)
+        {
+            //var files = Directory.GetFiles("imG/LL", "*.png");
+            //var rand = new Random();
+            //pictureBox_LL.Size = new Size(150, 150);
+            //pictureBox_LL.ImageLocation = files[rand.Next(files.Length)]; ; //"imG/L-0.png"
+            //pictureBox_LL.Location = new Point(5, 289);
+            //imageBox1.Controls.Add(pictureBox_LL);
+
+            pictureBox_LL.Size = new Size(80, 80);
+            pictureBox_LL.Image = new Bitmap("imG/LL/L-1.png");
+            pictureBox_LL.Location = new Point(5, 289);
+            imageBox1.Controls.Add(pictureBox_LL);
+            track_img_R = false;
+            track_img_L = true;
+            track_img_UP = false;
+            track_img_NE = false;
+            track_img_NW = false;
+            timer_LL.Stop();
+        }
+
+        private void timer_up_Tick(object sender, EventArgs e)
+        {
+            //var files = Directory.GetFiles("imG/UP", "*.png");
+            //var rand = new Random();
+            //pictureBox_up.Size = new Size(150, 150);
+            //pictureBox_up.ImageLocation = files[rand.Next(files.Length)]; ; //"imG/L-0.png"
+            //pictureBox_up.Location = new Point(440, 5);
+            //imageBox1.Controls.Add(pictureBox_up);
+
+            pictureBox_up.Size = new Size(80, 80);
+            pictureBox_up.Image = new Bitmap("imG/UP/Up-1.png");
+            pictureBox_up.Location = new Point(440, 5);
+            imageBox1.Controls.Add(pictureBox_up);
+            track_img_R = false;
+            track_img_L = false;
+            track_img_UP = true;
+            track_img_NE = false;
+            track_img_NW = false;
+            timer_up.Stop();
+        }
+
+        private void timer_NE_Tick(object sender, EventArgs e)
+        {
+            //var files = Directory.GetFiles("imG/NE", "*.png");
+            //var rand = new Random();
+            //pictureBox_NE.Size = new Size(150, 150);
+            //pictureBox_NE.ImageLocation = files[rand.Next(files.Length)]; //"imG/L-0.png"
+            //pictureBox_NE.Location = new Point(750, 53);
+            //imageBox1.Controls.Add(pictureBox_NE);
+
+            pictureBox_NE.Size = new Size(80, 80);
+            pictureBox_NE.Image = new Bitmap("imG/NE/NE-1.png");
+            pictureBox_NE.Location = new Point(750, 53);
+            imageBox1.Controls.Add(pictureBox_NE);
+            track_img_R = false;
+            track_img_L = false;
+            track_img_UP = false;
+            track_img_NE = true;
+            track_img_NW = false;
+            timer_NE.Stop();
+        }
+
+
+        private void timer_NW_Tick(object sender, EventArgs e)
+        {
+            //var files = Directory.GetFiles("imG/NW", "*.png");
+            //var rand = new Random();
+            //pictureBox_NW.Size = new Size(150, 150);
+            //pictureBox_NW.ImageLocation = files[rand.Next(files.Length)]; ; //"imG/L-0.png"
+            //pictureBox_NW.Location = new Point(110, 50);
+            //imageBox1.Controls.Add(pictureBox_NW);
+
+            pictureBox_NW.Size = new Size(80, 80);
+            pictureBox_NW.Image = new Bitmap("imG/NW/NW-1.png");
+            pictureBox_NW.Location = new Point(110, 50);
+            imageBox1.Controls.Add(pictureBox_NW);
+            track_img_R = false;
+            track_img_L = false;
+            track_img_UP = false;
+            track_img_NE = false;
+            track_img_NW = true;
+            timer_NW.Stop();
+        }
+        //=======================================
+    }
+}
